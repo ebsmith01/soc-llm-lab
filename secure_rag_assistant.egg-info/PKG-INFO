@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: secure-rag-assistant
+Version: 0.1.0
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: httpx
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: scikit-learn
+Requires-Dist: rank-bm25
+Requires-Dist: faiss-cpu; platform_system != "Windows"
+Requires-Dist: psycopg[binary]
+Requires-Dist: pgvector
+Requires-Dist: sentence-transformers
+Requires-Dist: transformers
+Requires-Dist: accelerate
+Requires-Dist: evaluate
+Requires-Dist: opentelemetry-sdk
+Requires-Dist: opentelemetry-instrumentation-fastapi
+Requires-Dist: python-dotenv
+Requires-Dist: pytest

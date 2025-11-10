@@ -1,0 +1,21 @@
+fastapi
+uvicorn
+pydantic
+httpx
+numpy
+pandas
+scikit-learn
+rank-bm25
+psycopg[binary]
+pgvector
+sentence-transformers
+transformers
+accelerate
+evaluate
+opentelemetry-sdk
+opentelemetry-instrumentation-fastapi
+python-dotenv
+pytest
+
+[:platform_system != "Windows"]
+faiss-cpu

@@ -1,0 +1,3 @@
+{"id": "nist-1", "text": "Access control policies define who can access what resources and under what conditions.", "meta": {"doc_id": "nist-800-53", "chunk_id": 1}}
+{"id": "nist-2", "text": "Least privilege ensures users are granted the minimum permissions necessary to perform their duties.", "meta": {"doc_id": "nist-800-53", "chunk_id": 2}}
+{"id": "owasp-1", "text": "Multi-factor authentication reduces the impact of credential compromise.", "meta": {"doc_id": "owasp-asvs", "chunk_id": 5}}
