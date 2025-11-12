@@ -1,7 +1,10 @@
-from typing import Dict, Any
+import os
+from openai import OpenAI
 from rag.retrieval import HybridRetriever
 from rag.guardrails import scrub_pii, is_injection
-from rag.prompts import ANSWER_TEMPLATE
+from rag.prompts import SYSTEM_PROMPT
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 _retriever = None
 
@@ -9,20 +12,28 @@ def _get_retriever():
     global _retriever
     if _retriever is None:
         _retriever = HybridRetriever()
-    return _retriever
+    return _retrieverxs
 
-def _compose_answer(passages):
-    bullets = []
-    citations = []
-    for i, chunk in enumerate(passages[:3]):
-        bullets.append(f"- {chunk.text.strip()}")
-        citations.append(f"- [{chunk.meta.get('doc_id','doc')}:{chunk.meta.get('chunk_id', i)}]")
-    return ANSWER_TEMPLATE.format(
-        answer="\n".join(bullets),
-        citations="\n".join(citations)
-    )
 
-def answer_query(q: str, top_k: int = 8) -> Dict[str, Any]:
+def build_prompt(question, passages):
+    context = []
+    for p in passages[:6]:  # keep context tight
+        context.append(f"[Source: {p.meta.get('doc_id')}:{p.meta.get('chunk_id')}]
+{p.text}")
+    context_text = "
+
+".join(context)
+
+    return f"{SYSTEM_PROMPT}
+
+Context:
+{context_text}
+
+Question: {question}
+Answer:"
+
+
+def answer_query(q: str, top_k: int = 8):
     original = q
     q = scrub_pii(q)
 
@@ -30,11 +41,19 @@ def answer_query(q: str, top_k: int = 8) -> Dict[str, Any]:
         return {"answer": "Query blocked by guardrails.", "citations": [], "guardrails": {"blocked": True}}
 
     passages = _get_retriever().search(q, k=top_k)
-    answer = _compose_answer(passages)
+    prompt = build_prompt(q, passages)
+
+    response = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0
+    )
+
+    answer = response.choices[0].message.content
 
     return {
         "question": original,
         "answer": answer,
-        "citations": [p.meta for p in passages[:3]],
+        "citations": [p.meta for p in passages[:6]],
         "guardrails": {"blocked": False},
     }
