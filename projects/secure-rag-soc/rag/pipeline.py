@@ -12,25 +12,23 @@ def _get_retriever():
     global _retriever
     if _retriever is None:
         _retriever = HybridRetriever()
-    return _retrieverxs
+    return _retriever
 
 
 def build_prompt(question, passages):
     context = []
     for p in passages[:6]:  # keep context tight
-        context.append(f"[Source: {p.meta.get('doc_id')}:{p.meta.get('chunk_id')}]
-{p.text}")
-    context_text = "
+        context.append(
+            f"[Source: {p.meta.get('doc_id')}:{p.meta.get('chunk_id')}]\n{p.text}"
+        )
+    context_text = "\n\n".join(context)
 
-".join(context)
-
-    return f"{SYSTEM_PROMPT}
-
-Context:
-{context_text}
-
-Question: {question}
-Answer:"
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"Context:\n{context_text}\n\n"
+        f"Question: {question}\n"
+        f"Answer:"
+    )
 
 
 def answer_query(q: str, top_k: int = 8):
