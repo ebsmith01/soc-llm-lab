@@ -1,0 +1,10 @@
+[project]
+name = "agent-lite"
+version = "0.1.0"
+dependencies = [
+  "httpx",
+  "pydantic",
+]
+
+[tool.setuptools]
+packages = ["agent"]
