@@ -13,7 +13,8 @@ try:
 except Exception:
     _HAS_ST = False
 
-CHUNKS_PATH = Path(os.getenv("CHUNKS_PATH", "data/processed/chunks.jsonl"))
+_DEFAULT_CHUNKS = Path(__file__).resolve().parents[1] / "data" / "processed" / "chunks.jsonl"
+CHUNKS_PATH = Path(os.getenv("CHUNKS_PATH", str(_DEFAULT_CHUNKS)))
 
 @dataclass
 class Chunk:

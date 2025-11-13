@@ -1,0 +1,28 @@
+[project]
+name = "secure-rag-assistant"
+version = "0.1.0"
+
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "httpx",
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "rank-bm25",
+  "faiss-cpu; platform_system != 'Windows'",
+  "psycopg[binary]",
+  "pgvector",
+  "sentence-transformers",
+  "transformers",
+  "accelerate",
+  "evaluate",
+  "opentelemetry-sdk",
+  "opentelemetry-instrumentation-fastapi",
+  "python-dotenv",
+  "pytest",
+]
+
+[tool.setuptools]
+packages = ["rag", "service", "storage", "scripts"]

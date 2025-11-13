@@ -1,0 +1,10 @@
+version: '3.9'
+services:
+  secure-rag-api:
+    build:
+      context: ../projects/secure-rag-soc
+      dockerfile: Dockerfile
+    env_file:
+      - ../projects/secure-rag-soc/.env.example
+    ports:
+      - "8000:8000"
