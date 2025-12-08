@@ -1,15 +1,16 @@
-PROJECT_DIR?=projects/secure-rag-soc
+PYTHON ?= python3
 
 .PHONY: run ingest test clean
 
 run:
-	$(MAKE) -C $(PROJECT_DIR) run
+	uvicorn service.api:app --reload --app-dir .
 
 ingest:
-	$(MAKE) -C $(PROJECT_DIR) ingest
+	$(PYTHON) scripts/ingest.py
 
 test:
-	$(MAKE) -C $(PROJECT_DIR) test
+	PYTHONPATH=. pytest
 
 clean:
-	$(MAKE) -C $(PROJECT_DIR) clean
+	rm -rf __pycache__ */__pycache__
+	rm -rf .pytest_cache

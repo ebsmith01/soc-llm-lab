@@ -6,7 +6,6 @@ numpy
 pandas
 scikit-learn
 rank-bm25
-faiss-cpu
 psycopg[binary]
 pgvector
 sentence-transformers
@@ -19,7 +18,11 @@ langchain-huggingface
 pypdf
 docx2txt
 beautifulsoup4
+openai
 opentelemetry-sdk
 opentelemetry-instrumentation-fastapi
 python-dotenv
 pytest
+
+[:platform_system != "Windows"]
+faiss-cpu

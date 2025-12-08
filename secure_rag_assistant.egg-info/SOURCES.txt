@@ -1,10 +1,17 @@
+README.md
 pyproject.toml
+libs/__init__.py
+libs/guardrails.py
+libs/prompts.py
+libs/utils.py
 rag/__init__.py
 rag/guardrails.py
 rag/pipeline.py
 rag/prompts.py
 rag/retrieval.py
 scripts/__init__.py
+scripts/benchmark_chunking.py
+scripts/chunks.py
 scripts/ingest.py
 secure_rag_assistant.egg-info/PKG-INFO
 secure_rag_assistant.egg-info/SOURCES.txt
@@ -14,5 +21,7 @@ secure_rag_assistant.egg-info/top_level.txt
 service/__init__.py
 service/api.py
 storage/__init__.py
+tests/test_chunk.py
 tests/test_ingest_and_pipeline.py
 tests/test_pipeline.py
+tests/test_prompt.py

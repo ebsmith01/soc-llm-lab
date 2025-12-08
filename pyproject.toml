@@ -1,12 +1,35 @@
 [project]
-name = "soc-llm-lab"
+name = "secure-rag-assistant"
 version = "0.1.0"
-description = "SOC LLM experimentation lab"
-requires-python = ">=3.10"
-dependencies = []
 
-[tool.ruff]
-line-length = 100
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "httpx",
+  "numpy",
+  "pandas",
+  "scikit-learn",
+  "rank-bm25",
+  "faiss-cpu; platform_system != 'Windows'",
+  "psycopg[binary]",
+  "pgvector",
+  "sentence-transformers",
+  "transformers",
+  "accelerate",
+  "evaluate",
+  "langchain-community",
+  "langchain-experimental",
+  "langchain-huggingface",
+  "pypdf",
+  "docx2txt",
+  "beautifulsoup4",
+  "openai",
+  "opentelemetry-sdk",
+  "opentelemetry-instrumentation-fastapi",
+  "python-dotenv",
+  "pytest"
+]
 
-[tool.pytest.ini_options]
-testpaths = ["projects"]
+[tool.setuptools]
+packages = ["rag", "service", "storage", "scripts", "libs"]
