@@ -18,7 +18,6 @@ from libs.utils import token_count, estimate_cost, check_json
 from openai import OpenAI
 import json
 
-OPENAI_API_KEY="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"
 client = OpenAI (api_key=OPENAI_API_KEY)
 '''
 # ---------------------------------------------
