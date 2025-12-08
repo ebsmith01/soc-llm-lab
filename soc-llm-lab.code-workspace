@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../../soc-llm-lab"
+		},
+		{
+			"name": "soc-llm-lab-1",
+			"path": "../../../soc-llm-lab-1"
+		}
+	],
+	"settings": {}
+}
