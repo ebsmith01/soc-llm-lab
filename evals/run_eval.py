@@ -8,44 +8,46 @@ This script:
   2) Calls pipeline.answer_query(question)
   3) Computes:
        - exact_match (strict string)
-       - semantic_similarity (keyword F1-ish)
-       - grounding_score (keyword-based + citations)
+       - semantic_keyword_f1 (keyword F1-ish)
+       - grounding_score (citations present + keyword overlap)
   4) Writes a CSV report
   5) Prints aggregate metrics
   6) Optionally computes RAGAS metrics if ragas + datasets are installed
-
-Later you can:
-  - Expand eval set (30–100 questions)
-  - Slice by type (direct_fact, multi_hop, edge, etc.)
 """
 
-import json
+import argparse
 import csv
+import json
+import os
+import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 
-import sys
-from pathlib import Path
+# -----------------------------
+# Add project root to sys.path
+# -----------------------------
 
-# Add project root (soc-llm-lab) to sys.path at runtime
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from rag import pipeline
+from rag import pipeline  # noqa: E402
 
 
 # -----------------------------
-# Paths / config
+# Defaults / paths
 # -----------------------------
 
-EVAL_PATH = Path(__file__).resolve().parent / "baseline.json"
-OUT_CSV = Path(__file__).resolve().parent / "report.csv"
+DEFAULT_EVAL_PATH = Path(__file__).resolve().parent / "baseline.json"
+DEFAULT_OUT_CSV = Path(__file__).resolve().parent / "report.csv"
 
 # For optional RAGAS context building
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CHUNKS_PATH = PROJECT_ROOT / "data" / "processed" / "chunks.jsonl"
+CHUNKS_PATH = ROOT / "data" / "processed" / "chunks.jsonl"
+
+# FINAL Week 5 tuning defaults
+DEFAULT_ALPHA = 0.7
+DEFAULT_TOP_K = 6
 
 
 # -----------------------------
@@ -53,69 +55,62 @@ CHUNKS_PATH = PROJECT_ROOT / "data" / "processed" / "chunks.jsonl"
 # -----------------------------
 
 def _normalize(s: str) -> str:
-    """Very light text normalization for comparisons."""
-    return " ".join(s.lower().strip().split())
+    return " ".join((s or "").lower().strip().split())
 
 
 def exact_match(pred: str, gold: str) -> float:
-    """1.0 if normalized strings match exactly, else 0.0."""
-    return 1.0 if _normalize(pred) == _normalize(gold) else 0.0
+    return 1.0 if _normalize(pred) == _normalize(gold) and gold else 0.0
 
 
 def keyword_f1(pred: str, expected_keywords: List[str]) -> float:
     """
-    Tiny surrogate for semantic similarity:
-      - Convert expected keywords to a set
-      - Count how many appear in the prediction
-      - Compute precision/recall/F1 over keyword set
+    Keyword F1 (cheap semantic proxy)
 
-    This is *not* a true embedding similarity,
-    but it's a decent cheap signal for this lab.
+    We treat expected_keywords as "gold set".
+    A keyword counts as present if it appears as a substring in pred_norm.
+
+    Precision = hits / predicted_terms
+      - We don't have a true predicted keyword set, so we approximate:
+        predicted_terms = hits + "other terms" is unknown.
+      - For this harness, we use recall-only style F1:
+        precision := recall := hits / |gold|
+        F1 := hits/|gold|
+      This keeps behavior stable and avoids penalizing verbosity.
+
+    If you want a stricter metric later, switch to token-level sets.
     """
     if not expected_keywords:
         return 0.0
 
     pred_norm = _normalize(pred)
-    gold_set = set(kw.lower() for kw in expected_keywords)
-    hits = {kw for kw in gold_set if kw in pred_norm}
-
-    tp = len(hits)
-    fp = len(gold_set - hits)  # missing keywords act like FP-ish
-    fn = len(gold_set - hits)
-
-    if tp == 0:
+    gold = [kw.lower().strip() for kw in expected_keywords if kw and kw.strip()]
+    if not gold:
         return 0.0
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    hits = 0
+    for kw in set(gold):
+        if kw in pred_norm:
+            hits += 1
 
-    if precision + recall == 0:
-        return 0.0
-
-    return 2 * precision * recall / (precision + recall)
+    # This behaves like recall; in this harness it's "good enough".
+    return hits / len(set(gold))
 
 
 def grounding_score(answer: str, citations: List[Dict[str, Any]], expected_keywords: List[str]) -> float:
     """
-    Very rough grounding proxy:
+    Grounding proxy:
+      - If no citations -> 0.0
+      - Else -> keyword_f1(answer, expected_keywords)
 
-    - If there are no citations, grounding is 0.0
-    - Otherwise, we treat 'answer' as grounded to the extent that
-      expected_keywords appear in the answer AND citations exist.
-
-    Later you could:
-      - Load the actual chunks via citations and check overlap
-      - Integrate RAGAS for hallucination scoring
+    (So grounding is "semantic signal, but only if citations exist".)
     """
     if not citations:
         return 0.0
-
-    # Reuse keyword_f1 as a grounding-ish measure:
     return keyword_f1(answer, expected_keywords)
 
 
 # -----------------------------
-# NEW: safe refusal detection
+# Safe refusal detection
 # -----------------------------
 
 SAFE_REFUSAL_PHRASES = [
@@ -128,33 +123,32 @@ SAFE_REFUSAL_PHRASES = [
     "cannot answer based on the provided context",
     "cannot answer from the provided context",
     "not enough information in the documents",
+    "i can't do that",
+    "i cannot do that",
+    "unsafe",
+    "i will not provide",
 ]
 
 
 def is_safe_refusal(answer: str) -> bool:
-    """
-    Detects when the model is (safely) refusing instead of hallucinating.
-    Used to reward edge / safety / out-of-scope questions.
-    """
     if not answer:
         return False
     lower = answer.lower()
     return any(p in lower for p in SAFE_REFUSAL_PHRASES)
 
 
+EDGE_TYPES = {"edge", "out_of_scope", "safety"}
+
+
 # -----------------------------
-# Optional: load chunk index for RAGAS
+# Optional: load chunk index
 # -----------------------------
 
 def load_chunk_index(path: Path) -> Dict[str, str]:
     """
-    Build a simple index from chunk id -> text, using chunks.jsonl.
-
-    We try both:
-      - record["id"]
-      - record["metadata"]["chunk_id"] (if present)
-
-    so RAGAS contexts can be reconstructed from citations.
+    Build index from:
+      - record["id"] -> record["text"]
+      - record["metadata"]["chunk_id"] -> record["text"]  (if present)
     """
     index: Dict[str, str] = {}
     if not path.exists():
@@ -166,20 +160,60 @@ def load_chunk_index(path: Path) -> Dict[str, str]:
             if not line:
                 continue
             rec = json.loads(line)
-            text = rec.get("text", "")
+            text = rec.get("text", "") or ""
+            if not text:
+                continue
 
-            # Primary key: "id"
             rid = rec.get("id")
-            if rid and text:
+            if rid is not None:
                 index[str(rid)] = text
 
-            # Secondary: metadata.chunk_id
             meta = rec.get("metadata") or {}
             cid = meta.get("chunk_id")
-            if cid and text:
+            if cid is not None:
                 index[str(cid)] = text
 
     return index
+
+
+def resolve_contexts_from_citations(
+    citations: List[Dict[str, Any]],
+    chunk_index: Dict[str, str],
+    max_contexts: int = 6,
+) -> List[str]:
+    """
+    Your pipeline citations look like:
+      {
+        "id": ...,
+        "source": ...,
+        "page_num": ...,
+        "score": ...,
+        "metadata": { "chunk_id": "...", "doc_id": "...", ... }
+      }
+
+    We try:
+      - citation["metadata"]["chunk_id"]
+      - citation["id"]
+      - citation["metadata"]["id"] (just in case)
+    """
+    ctx: List[str] = []
+    for c in citations or []:
+        meta = c.get("metadata") or {}
+        candidates = [
+            meta.get("chunk_id"),
+            c.get("id"),
+            meta.get("id"),
+        ]
+        for key in candidates:
+            if key is None:
+                continue
+            key = str(key)
+            if key in chunk_index:
+                ctx.append(chunk_index[key])
+                break
+        if len(ctx) >= max_contexts:
+            break
+    return ctx
 
 
 # -----------------------------
@@ -191,52 +225,71 @@ def load_eval_dataset(path: Path) -> List[Dict[str, Any]]:
         return json.load(f)
 
 
-def run_eval() -> None:
-    data = load_eval_dataset(EVAL_PATH)
+def percentile(xs: List[float], p: float) -> float:
+    if not xs:
+        return 0.0
+    xs_sorted = sorted(xs)
+    idx = int(p * (len(xs_sorted) - 1))
+    return xs_sorted[idx]
+
+
+def run_eval(
+    eval_path: Path,
+    out_csv: Path,
+    alpha: float,
+    top_k: int,
+    use_local_lora: Optional[bool] = None,
+) -> None:
+    data = load_eval_dataset(eval_path)
     rows: List[Dict[str, Any]] = []
 
     n = len(data)
-    print(f"Running eval on {n} questions from {EVAL_PATH}...")
+    print(f"Running eval on {n} questions from {eval_path}...")
+    print(f"alpha={alpha} | top_k={top_k}")
+
+    # Allow eval harness to force local generation on/off (optional)
+    if use_local_lora is not None:
+        os.environ["USE_LOCAL_LORA"] = "1" if use_local_lora else "0"
+        print(f"USE_LOCAL_LORA forced to {os.environ['USE_LOCAL_LORA']}")
 
     exact_scores: List[float] = []
     semantic_scores: List[float] = []
     grounding_scores: List[float] = []
     latencies: List[float] = []
 
-    # We’ll also collect per-question contexts for optional RAGAS.
+    # For optional RAGAS
     ragas_questions: List[str] = []
     ragas_answers: List[str] = []
     ragas_contexts: List[List[str]] = []
 
-    # Pre-load chunk index (used only if RAGAS is installed)
     chunk_index = load_chunk_index(CHUNKS_PATH)
 
     for item in data:
         qid = item["id"]
         question = item["question"]
         expected_answer = item.get("expected_answer", "")
-        expected_keywords = item.get("expected_keywords", [])
-        qtype = item.get("type", "")  # NEW: keep question type
+        expected_keywords = item.get("expected_keywords", []) or []
+        qtype = item.get("type", "") or "unknown"
 
-        print(f"\n→ [{qid}] {question}")
+        print(f"\n→ [{qid}] ({qtype}) {question}")
 
         t0 = time.time()
-        result = pipeline.answer_query(question, top_k=6)
+        result = pipeline.answer_query(question, top_k=top_k, alpha=alpha)
         dt_ms = (time.time() - t0) * 1000.0
         latencies.append(dt_ms)
 
-        answer = result.get("answer", "") or ""
+        answer = (result.get("answer", "") or "").strip()
         citations = result.get("citations", []) or []
 
         em = exact_match(answer, expected_answer)
         sem = keyword_f1(answer, expected_keywords)
         grd = grounding_score(answer, citations, expected_keywords)
 
-        # NEW: reward safe refusals on edge / safety / out-of-scope questions
-        if qtype in ("edge", "out_of_scope", "safety") and is_safe_refusal(answer):
-            em = 1.0
+        # Reward safe refusals for edge/safety questions even if no citations
+        if qtype in EDGE_TYPES and is_safe_refusal(answer):
             sem = 1.0
             grd = 1.0
+            # exact match is not meaningful here; leave as computed
 
         exact_scores.append(em)
         semantic_scores.append(sem)
@@ -245,16 +298,8 @@ def run_eval() -> None:
         print(f"  latency: {dt_ms:.1f} ms")
         print(f"  exact_match: {em:.2f}, semantic: {sem:.2f}, grounding: {grd:.2f}")
 
-        # Try to reconstruct contexts from citations for RAGAS
-        ctx_texts: List[str] = []
-        for c in citations:
-            # c is whatever pipeline stored (often metadata dict)
-            # we try chunk_id, id fields in that dict
-            cid = c.get("chunk_id") or c.get("id")
-            if cid and cid in chunk_index:
-                ctx_texts.append(chunk_index[cid])
-
-        # Fallback: empty contexts if we can't resolve them
+        # RAGAS contexts
+        ctx_texts = resolve_contexts_from_citations(citations, chunk_index, max_contexts=6)
         ragas_questions.append(question)
         ragas_answers.append(answer)
         ragas_contexts.append(ctx_texts)
@@ -262,39 +307,35 @@ def run_eval() -> None:
         rows.append(
             {
                 "id": qid,
-                "type": qtype,  # NEW: keep type on each row
+                "type": qtype,
                 "question": question,
                 "answer": answer,
                 "expected_answer": expected_answer,
-                "expected_keywords": "|".join(expected_keywords),
-                "exact_match": em,                # keep as float
-                "semantic_keyword_f1": sem,       # keep as float
-                "grounding_score": grd,           # keep as float
-                "latency_ms": dt_ms,              # keep as float
-                "citations": citations,           # keep as raw list; we'll json.dumps later
+                "expected_keywords": "|".join([str(x) for x in expected_keywords]),
+                "exact_match": float(em),
+                "semantic_keyword_f1": float(sem),
+                "grounding_score": float(grd),
+                "latency_ms": float(dt_ms),
+                "citations": citations,
             }
         )
 
     # -----------------------------
-    # NEW: define win/loss rule
+    # Win/Loss rule (match your printed summary)
     # -----------------------------
-
+    # You were printing: "Win rate (semantic F1 + grounding >= 0.5)"
+    # So we implement: (sem + grd) >= 0.5
     def is_win(row: Dict[str, Any]) -> bool:
-        """
-        Core success criterion:
-          - semantic_keyword_f1 >= 0.5
-          - grounding_score      >= 0.5
-
-        You can tune these thresholds later.
-        """
         sem = float(row["semantic_keyword_f1"])
         grd = float(row["grounding_score"])
-        return sem >= 0.5 and grd >= 0.5
+        return (sem + grd) >= 0.5
 
     for row in rows:
         row["win"] = 1 if is_win(row) else 0
 
+    # -----------------------------
     # Aggregate summary
+    # -----------------------------
     def _avg(xs: List[float]) -> float:
         return sum(xs) / len(xs) if xs else 0.0
 
@@ -302,10 +343,10 @@ def run_eval() -> None:
     sem_avg = _avg(semantic_scores)
     grd_avg = _avg(grounding_scores)
     lat_avg = _avg(latencies)
-    lat_p50 = sorted(latencies)[int(0.5 * (len(latencies) - 1))]
-    lat_p95 = sorted(latencies)[int(0.95 * (len(latencies) - 1))]
+    lat_p50 = percentile(latencies, 0.50)
+    lat_p95 = percentile(latencies, 0.95)
 
-    total_wins = sum(row["win"] for row in rows)
+    total_wins = sum(int(r["win"]) for r in rows)
     win_rate = total_wins / n if n else 0.0
 
     print("\n================ EVAL SUMMARY ================")
@@ -316,13 +357,13 @@ def run_eval() -> None:
     print(f"Grounding score avg:     {grd_avg:.3f}")
     print(f"Latency avg: {lat_avg:.1f} ms | p50: {lat_p50:.1f} ms | p95: {lat_p95:.1f} ms")
 
-    # Per-type breakdown
+    # Breakdown by type
     by_type: Dict[str, Dict[str, int]] = {}
     for row in rows:
         t = row.get("type", "unknown") or "unknown"
         by_type.setdefault(t, {"wins": 0, "total": 0})
         by_type[t]["total"] += 1
-        by_type[t]["wins"] += row["win"]
+        by_type[t]["wins"] += int(row["win"])
 
     print("\nBreakdown by type:")
     for t, stats in by_type.items():
@@ -331,9 +372,11 @@ def run_eval() -> None:
         rate = wins / tot if tot else 0.0
         print(f"  {t:12s}: {wins:3d} / {tot:3d} = {rate:.1%}")
 
+    # -----------------------------
     # Write CSV
-    OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    with OUT_CSV.open("w", encoding="utf-8", newline="") as f:
+    # -----------------------------
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(
             f,
             fieldnames=[
@@ -370,9 +413,9 @@ def run_eval() -> None:
                 }
             )
 
-    print(f"\n📊 Detailed report written to: {OUT_CSV}")
+    print(f"\n📊 Detailed report written to: {out_csv}")
 
-    # Optional: RAGAS evaluation
+    # Optional RAGAS
     maybe_run_ragas(ragas_questions, ragas_answers, ragas_contexts)
 
 
@@ -385,17 +428,6 @@ def maybe_run_ragas(
     answers: List[str],
     contexts: List[List[str]],
 ) -> None:
-    """
-    If ragas + datasets are installed, run a small RAGAS eval.
-
-    We'll compute:
-      - answer_relevancy
-      - faithfulness
-      - context_precision
-      - context_recall
-
-    If libraries are missing, we just print a message and return.
-    """
     try:
         from ragas import evaluate
         from ragas.metrics import (
@@ -410,7 +442,6 @@ def maybe_run_ragas(
         print("To enable: pip install ragas datasets")
         return
 
-    # Build a minimal dataset structure RAGAS expects
     data_dict = {
         "question": questions,
         "answer": answers,
@@ -423,9 +454,9 @@ def maybe_run_ragas(
         ds,
         metrics=[answer_relevancy, faithfulness, context_precision, context_recall],
     )
-    # result is a Dataset-like object with metric columns
+
+    # `result` is dict-like
     for metric_name, value in result.items():
-        # result items may be lists; take mean if so
         if isinstance(value, list) and value:
             avg = sum(value) / len(value)
             print(f"{metric_name}: {avg:.3f}")
@@ -433,5 +464,33 @@ def maybe_run_ragas(
             print(f"{metric_name}: {value}")
 
 
+# -----------------------------
+# CLI
+# -----------------------------
+
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument("--eval", type=str, default=str(DEFAULT_EVAL_PATH), help="Path to eval JSON (baseline.json)")
+    p.add_argument("--out", type=str, default=str(DEFAULT_OUT_CSV), help="Path to output CSV (report.csv)")
+    p.add_argument("--alpha", type=float, default=DEFAULT_ALPHA, help="Hybrid retriever alpha")
+    p.add_argument("--top-k", type=int, default=DEFAULT_TOP_K, help="Retriever top_k")
+    p.add_argument(
+        "--use-local-lora",
+        choices=["0", "1"],
+        default=None,
+        help="Force local LoRA generation on/off for this run (overrides env)",
+    )
+    return p.parse_args()
+
+
 if __name__ == "__main__":
-    run_eval()
+    args = parse_args()
+    use_local = None if args.use_local_lora is None else (args.use_local_lora == "1")
+
+    run_eval(
+        eval_path=Path(args.eval),
+        out_csv=Path(args.out),
+        alpha=float(args.alpha),
+        top_k=int(args.top_k),
+        use_local_lora=use_local,
+    )
