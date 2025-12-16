@@ -23,6 +23,12 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
+import os
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+import argparse
+import os
+from datetime import datetime
+
 
 # -----------------------------
 # Add project root to sys.path
@@ -482,15 +488,45 @@ def parse_args() -> argparse.Namespace:
     )
     return p.parse_args()
 
-
 if __name__ == "__main__":
-    args = parse_args()
-    use_local = None if args.use_local_lora is None else (args.use_local_lora == "1")
+    parser = argparse.ArgumentParser(description="Run RAG evaluation")
+
+    parser.add_argument("--alpha", type=float, default=0.7)
+    parser.add_argument("--top-k", type=int, default=6)
+    parser.add_argument("--use-local-lora", type=int, default=0)
+    parser.add_argument(
+        "--eval-path",
+        type=str,
+        default=str(Path(__file__).parent / "baseline.json"),
+    )
+    parser.add_argument(
+        "--out",
+        type=str,
+        default="",
+        help="Optional output CSV path",
+    )
+
+    args = parser.parse_args()
+
+    # Toggle local LoRA via env var (pipeline reads this)
+    if args.use_local_lora:
+        os.environ["USE_LOCAL_LORA"] = "1"
+
+    eval_path = Path(args.eval_path)
+
+    if args.out:
+        out_csv = Path(args.out)
+    else:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        mode = "lora" if args.use_local_lora else "openai"
+        out_csv = (
+            Path(__file__).parent
+            / f"report_{mode}_a{args.alpha}_k{args.top_k}_{stamp}.csv"
+        )
 
     run_eval(
-        eval_path=Path(args.eval),
-        out_csv=Path(args.out),
-        alpha=float(args.alpha),
-        top_k=int(args.top_k),
-        use_local_lora=use_local,
+        eval_path=eval_path,
+        out_csv=out_csv,
+        alpha=args.alpha,
+        top_k=args.top_k,
     )

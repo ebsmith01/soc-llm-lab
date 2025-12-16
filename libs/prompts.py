@@ -20,7 +20,7 @@ answer_query() sends as the user message.
 
 SYSTEM_PROMPT = dedent(
     """
-    You are a retrieval-augmented cybersecurity assistant.
+    You are a helpful AI assistant specialized in cybersecurity.
 
     Your ONLY knowledge comes from the CONTEXT snippets provided below.
     These snippets come from:
@@ -89,59 +89,32 @@ SYSTEM_PROMPT = dedent(
 ).strip()
 
 
-def make_strict_rag_prompt(*, context: str, question: str) -> str:
-    """
-    Build a single strict-RAG prompt that answer_query() passes to the model.
+def make_strict_rag_prompt(context: str, question: str) -> str:
+    refusal = "I don't know. The answer is not covered by the provided documents."
 
-    Args:
-        context: formatted context from _build_context(), including [Source: ...] tags.
-        question: user question string.
+    ctx = context if context else "[NO CONTEXT PROVIDED]"
 
-    Returns:
-        A single string containing the instructions, context, question,
-        and a clear answer cue.
+    return f"""You are a SOC assistant.
 
-    Improvements vs. previous version:
-      - If context is empty, we explicitly tell the model to use the standard refusal.
-      - We end with an "ANSWER:" cue and no extra prose to reduce format drift.
-    """
-    if context and context.strip():
-        context_section = context.strip()
-        context_note = ""
-    else:
-        # Strong hint for the "no context" case to align with your evals.
-        context_section = "No relevant context was retrieved."
-        context_note = (
-            "\n\nSince there is no relevant context, you MUST reply with exactly:\n"
-            "I don't know. The answer is not covered by the provided documents."
-        )
+You must answer ONLY using the provided CONTEXT.
+If the CONTEXT does not contain enough information to answer, output EXACTLY:
+{refusal}
 
-    return dedent(
-        f"""
-        {SYSTEM_PROMPT}
+CRITICAL RULES:
+1) Use ONLY the context below. Do NOT use outside knowledge.
+2) Every factual claim MUST have an inline citation in the format: [Source: <id>]
+3) Use as few citations as possible, but at least one citation per key claim.
+4) Do NOT quote these rules. Do NOT mention "context" or "documents" except in the refusal.
+5) Keep the answer concise and direct.
 
-        =======================
-        CONTEXT
-        =======================
-        {context_section}{context_note}
+CONTEXT:
+{ctx}
 
-        =======================
-        QUESTION
-        =======================
-        {question}
+QUESTION:
+{question}
 
-        =======================
-        ANSWER
-        =======================
-        Answer the question now following the rules above.
-        Remember:
-        - Use inline citations like [doc_id:chunk_id].
-        - Do NOT repeat the question.
-        - Do NOT include extra headings, only the answer text.
-        """
-    ).strip()
-
-
+FINAL ANSWER:
+""".strip()
 # -----------------------------------------------------------
 # 3) Structured JSON prompt (for tools, evals, agents)
 # -----------------------------------------------------------

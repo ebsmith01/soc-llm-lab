@@ -63,6 +63,7 @@ def scrub_pii(text: str) -> str:
 
 # Things that are clearly not in your corpus or are too sensitive
 OUT_OF_SCOPE_PATTERNS = [
+    "tax strategy",
     "tax advice",
     "tax law",
     "investment tax",
