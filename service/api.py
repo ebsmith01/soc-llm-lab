@@ -1,44 +1,115 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict, Optional
+import time
+import uuid
+from typing import Any
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+import structlog
+from fastapi import FastAPI, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from rag.agent import run_agent
+from service import schemas
+from service.rag_service import RagService
+from service.observability.logging import setup_logging
+from service.observability.metrics import instrument_metrics
+from service.observability.tracing import setup_tracing
 
-app = FastAPI(title="SOC LLM Lab")
-
-class AnswerRequest(BaseModel):
-    question: str = Field(..., min_length=1)
-    top_k: int = Field(6, ge=1, le=20)
-    alpha: float = Field(0.7, ge=0.0, le=1.0)
-    use_local_lora: Optional[bool] = None
-
-class AnswerResponse(BaseModel):
-    type: str
-    answer: str
-    citations: list[dict]
-    tool_trace: list[dict]
-
-@app.get("/healthz")
-def healthz() -> Dict[str, str]:
-    return {"status": "ok"}
-
-@app.post("/answer", response_model=AnswerResponse)
-def answer(req: AnswerRequest) -> Dict[str, Any]:
-    # allow env default if caller doesn't pass it
-    use_local = req.use_local_lora
-    if use_local is None:
-        use_local = os.getenv("USE_LOCAL_LORA", "0") == "1"
-
-    return run_agent(
-        req.question,
-        top_k=req.top_k,
-        alpha=req.alpha,
-        use_local_lora=use_local,
-    )
+log = structlog.get_logger()
 
 
+def create_app() -> FastAPI:
+    setup_logging()
+    setup_tracing()
 
+    app = FastAPI(title="SOC LLM Lab API", version="0.1.0")
+    metrics = instrument_metrics(app)
+    svc = RagService()
+
+    @app.middleware("http")
+    async def request_telemetry(request: Request, call_next):
+        # Correlation id (lets you tie logs/traces/metrics together)
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = request_id
+
+        start = time.perf_counter()
+        status_code = 500
+
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        except Exception as e:
+            # Structured error log (stack trace)
+            log.exception(
+                "request_failed",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                error_type=type(e).__name__,
+            )
+            raise
+        finally:
+            duration = time.perf_counter() - start
+            latency_ms = round(duration * 1000, 2)
+
+            # Metrics: keep labels LOW-cardinality (route + status + method)
+            if metrics:
+                # If your instrument_metrics already defines these keys, use them.
+                # (If not, adjust instrument_metrics to match.)
+                metrics["http_latency"].labels(path=request.url.path).observe(duration)
+                metrics["http_requests"].labels(
+                    method=request.method,
+                    path=request.url.path,
+                    status=str(status_code),
+                ).inc()
+
+                # Optional convenience counters for /ask
+                if request.url.path == "/ask":
+                    metrics["ask_latency"].observe(duration)
+                    metrics["ask_requests"].inc()
+
+            # One INFO log per request
+            log.info(
+                "request_summary",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status=status_code,
+                latency_ms=latency_ms,
+            )
+
+    @app.get("/health", summary="Health check")
+    async def health() -> JSONResponse:
+        # Liveness (fast)
+        return JSONResponse({"status": "ok"})
+
+    @app.get("/metrics", summary="Prometheus metrics")
+    async def metrics_endpoint() -> Response:
+        # Prometheus scrape endpoint
+        data = generate_latest()
+        return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/ask", response_model=schemas.QueryResponse, summary="Run RAG query")
+    async def ask(payload: schemas.QueryRequest, request: Request) -> schemas.QueryResponse:
+        # NOTE: svc.answer is likely blocking (retrieval, embeddings, LLM calls).
+        # Use threadpool so we don't block the event loop.
+        result = await run_in_threadpool(
+            svc.answer,
+            payload.question,
+            use_local_lora=payload.use_local_lora,
+            top_k=payload.top_k,
+            alpha=payload.alpha,
+        )
+
+
+        # Optional: include request_id in the response if your schema supports it
+        # result["request_id"] = getattr(request.state, "request_id", None)
+
+        return schemas.QueryResponse(**result)
+
+    return app
+
+
+app = create_app()

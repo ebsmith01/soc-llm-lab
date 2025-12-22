@@ -2,7 +2,7 @@ Metadata-Version: 2.4
 Name: secure-rag-assistant
 Version: 0.1.0
 Requires-Dist: fastapi
-Requires-Dist: uvicorn
+Requires-Dist: uvicorn[standard]
 Requires-Dist: pydantic
 Requires-Dist: httpx
 Requires-Dist: numpy
@@ -23,7 +23,11 @@ Requires-Dist: pypdf
 Requires-Dist: docx2txt
 Requires-Dist: beautifulsoup4
 Requires-Dist: openai
+Requires-Dist: prometheus-client
+Requires-Dist: structlog
+Requires-Dist: opentelemetry-api
 Requires-Dist: opentelemetry-sdk
+Requires-Dist: opentelemetry-exporter-otlp
 Requires-Dist: opentelemetry-instrumentation-fastapi
 Requires-Dist: python-dotenv
 Requires-Dist: pytest
