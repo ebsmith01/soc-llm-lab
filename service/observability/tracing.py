@@ -1,5 +1,6 @@
 """
 OpenTelemetry tracing setup for the SOC LLM API.
+captures timing + metadata for incoming HTTP requests and RAG stages.
 
 - Uses OTLP HTTP exporter if OTEL_EXPORTER_OTLP_ENDPOINT is set
 - Instruments FastAPI automatically
@@ -35,6 +36,7 @@ def setup_tracing(
       A tracer instance if tracing is enabled, else None.
     """
 
+    # Demo note: exits early with a no-op tracer when no exporter is configured.
     # Prevent double-initialization (important for reload/tests)
     if isinstance(trace.get_tracer_provider(), TracerProvider):
         return trace.get_tracer(__name__)

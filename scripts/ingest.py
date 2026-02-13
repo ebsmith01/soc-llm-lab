@@ -41,8 +41,9 @@ CFG = {
         "min_repeats_ratio": 0.6
     },
     "chunking": {
-        "chunk_size": 500,
-        "chunk_overlap": 100
+        # Tuned smaller for better recall without creating tiny fragments
+        "chunk_size": 360,
+        "chunk_overlap": 80
     }
 }
 

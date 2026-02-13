@@ -10,13 +10,15 @@ from prometheus_client import Counter, Histogram
 # Low-level rules (important):
 # - Keep labels LOW-cardinality (route, method, status are OK)
 # - Never label by request_id, user_id, question text, IP, etc.
-# - Use histograms for latency so we can compute p95
+# - Use histograms for latency so p95 is easy to compute
 # -----------------------------
 
 
 def instrument_metrics(app: FastAPI) -> Dict[str, Any]:
     """
     Creates Prometheus metrics used by the API middleware and RAG pipeline.
+
+    Demo note: this keeps all metric definitions together for quick wiring.
 
     Returns a dict of metric objects so callers can do:
       metrics["http_latency"].labels(path="/ask").observe(0.123)

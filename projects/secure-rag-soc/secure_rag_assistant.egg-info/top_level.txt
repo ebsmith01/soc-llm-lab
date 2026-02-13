@@ -1,5 +1,0 @@
-libs
-rag
-scripts
-service
-storage

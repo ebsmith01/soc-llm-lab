@@ -14,8 +14,8 @@ Usage:
 import os
 import subprocess
 
-CHUNK_SIZES = [300, 400, 500]
-OVERLAPS = [60, 80, 100]
+CHUNK_SIZES = [300, 400, 500, 600]
+OVERLAPS = [60, 80, 100, 120, 150, 200]
 
 BASE_CMD = "python scripts/build_indexes.py --chunk-size {cs} --overlap {ov}"
 

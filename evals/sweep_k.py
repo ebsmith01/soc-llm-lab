@@ -23,7 +23,7 @@ Eval schema (your current baseline.json):
   ...
 ]
 
-We score using expected_keywords (or answer_substrings if present).
+Scoring uses expected_keywords (or answer_substrings if present).
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EVAL_PATH = PROJECT_ROOT / "evals" / "baseline.json"
 
 # Hyperparams to sweep
-TOP_K_VALUES = [3, 4, 6, 8]
-ALPHAS = [0.3, 0.5, 0.7]
+TOP_K_VALUES = [2]
+ALPHAS = [ 0.6, 0.7, 0.75, 0.8]
 
 
 # -------------------------------------------------------------------
@@ -116,7 +116,7 @@ def load_eval_questions(path: Path = EVAL_PATH) -> List[EvalQuestion]:
 def answer_matches(answer: str, expected_keywords: List[str]) -> bool:
     """
     Very simple scoring: if ANY expected keyword/phrase appears
-    (case-insensitive) in the answer, we count it as correct.
+    (case-insensitive) in the answer, it counts as correct.
 
     You can tighten this later (require all keywords, use regex, etc.).
     """
@@ -210,6 +210,7 @@ def summarize_latency(latencies_ms: List[float]) -> Tuple[float, float, float]:
 # -------------------------------------------------------------------
 
 def run_sweep():
+    # Demo note: quick hyperparameter sweep that prints a sorted leaderboard.
     baseline = load_eval_questions(EVAL_PATH)
 
     all_results: List[ConfigResult] = []

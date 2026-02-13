@@ -52,8 +52,8 @@ DEFAULT_OUT_CSV = Path(__file__).resolve().parent / "report.csv"
 CHUNKS_PATH = ROOT / "data" / "processed" / "chunks.jsonl"
 
 # FINAL Week 5 tuning defaults
-DEFAULT_ALPHA = 0.7
-DEFAULT_TOP_K = 6
+DEFAULT_ALPHA = 0.5
+DEFAULT_TOP_K = 4
 
 
 # -----------------------------
@@ -185,7 +185,7 @@ def load_chunk_index(path: Path) -> Dict[str, str]:
 def resolve_contexts_from_citations(
     citations: List[Dict[str, Any]],
     chunk_index: Dict[str, str],
-    max_contexts: int = 6,
+    max_contexts: int = 2,
 ) -> List[str]:
     """
     Your pipeline citations look like:
@@ -491,8 +491,8 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run RAG evaluation")
 
-    parser.add_argument("--alpha", type=float, default=0.7)
-    parser.add_argument("--top-k", type=int, default=6)
+    parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--top-k", type=int, default=4)
     parser.add_argument("--use-local-lora", type=int, default=0)
     parser.add_argument(
         "--eval-path",

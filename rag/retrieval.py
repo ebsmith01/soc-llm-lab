@@ -1,19 +1,4 @@
 """
-Day 3 — Hybrid Retriever (BM25 + Embeddings, no FAISS)
-
-STATUS
-------
-Production-style baseline hybrid retriever.
-
-It loads:
-  - chunks.jsonl          (your corpus)
-  - bm25.pkl              (lexical index)
-  - tokenized_corpus.json (BM25 tokenization)
-  - embeddings.npy        (semantic vectors)
-
-Then provides:
-  HybridRetriever.search(query, k=5)
-
 HIGH-LEVEL IDEA
 ---------------
 We do two searches:
@@ -123,7 +108,7 @@ class HybridRetriever:
         bm25: BM25Okapi,
         tokenized_corpus: List[List[str]],
         embeddings: np.ndarray,
-        alpha: float = 0.5,
+        alpha: float = 0.7,
     ):
         """
         alpha controls hybrid weighting:
@@ -161,7 +146,7 @@ class HybridRetriever:
     def from_processed_dir(
         cls,
         processed_dir: Optional[Path] = None,
-        alpha: float = 0.5,
+        alpha: float = 0.8,
     ) -> "HybridRetriever":
         """
         Load chunks + BM25 + embeddings from data/processed.
@@ -205,6 +190,10 @@ class HybridRetriever:
             embeddings=embeddings,
             alpha=alpha,
         )
+    
+    from rag.config import current_config
+
+
 
     # -----------------------------
     # Query embedding
@@ -334,3 +323,4 @@ class HybridRetriever:
             )
 
         return results
+    

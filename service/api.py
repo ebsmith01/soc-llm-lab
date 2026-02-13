@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# /health is for uptime checks, /metrics feeds Prometheus for monitoring, and /ask is the main RAG query endpoint.
+# start-up telemetry (logging + tracing) is wired in create_app() and the middleware.
+
 import time
 import uuid
 from typing import Any
@@ -23,6 +26,7 @@ def create_app() -> FastAPI:
     setup_logging()
     setup_tracing()
 
+    # Demo note: minimal FastAPI setup that wires telemetry and a single RAG endpoint.
     app = FastAPI(title="SOC LLM Lab API", version="0.1.0")
     metrics = instrument_metrics(app)
     svc = RagService()
@@ -94,7 +98,7 @@ def create_app() -> FastAPI:
     @app.post("/ask", response_model=schemas.QueryResponse, summary="Run RAG query")
     async def ask(payload: schemas.QueryRequest, request: Request) -> schemas.QueryResponse:
         # NOTE: svc.answer is likely blocking (retrieval, embeddings, LLM calls).
-        # Use threadpool so we don't block the event loop.
+        # Use threadpool so the event loop stays responsive.
         result = await run_in_threadpool(
             svc.answer,
             payload.question,
@@ -102,10 +106,6 @@ def create_app() -> FastAPI:
             top_k=payload.top_k,
             alpha=payload.alpha,
         )
-
-
-        # Optional: include request_id in the response if your schema supports it
-        # result["request_id"] = getattr(request.state, "request_id", None)
 
         return schemas.QueryResponse(**result)
 

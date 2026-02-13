@@ -1,8 +1,7 @@
 """
-Guardrails module: PII scrubbing, prompt injection detection, and (eventually)
-output validation helpers.
-
-These are used by rag.pipeline.answer_query() before calling the LLM.
+PII scrubbing, prompt-injection detection heuristics, and harmful or out-of-scope query filters.
+ corpus gate — if a query isn’t related to ATT&CK or AI security topics, it won’t generate an answer.
+include citations — otherwise it gets rejected.”
 """
 
 from __future__ import annotations
