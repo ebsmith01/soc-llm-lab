@@ -42,8 +42,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EVAL_PATH = PROJECT_ROOT / "evals" / "baseline.json"
 
 # Hyperparams to sweep
-TOP_K_VALUES = [2]
-ALPHAS = [ 0.6, 0.7, 0.75, 0.8]
+TOP_K_VALUES = [4]
+ALPHAS = [0.6]
 
 
 # -------------------------------------------------------------------

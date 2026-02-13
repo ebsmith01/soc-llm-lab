@@ -19,7 +19,7 @@ echo "✔ /health OK"
 # Test basic /ask
 ANSWER=$(curl -s -X POST "http://127.0.0.1:8000/ask" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is access control?", "top_k": 2}' | jq -r '.answer')
+  -d '{"question":"What is access control?", "top_k": 4}' | jq -r '.answer')
 
 if [[ -z "$ANSWER" ]]; then
   echo "❌ /ask did not return a valid answer"

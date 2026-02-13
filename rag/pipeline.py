@@ -1,11 +1,15 @@
 """
+rag/pipeline.py
+
 RAG pipeline:
 - HybridRetriever (BM25 + embeddings)
 - Guardrails: PII scrub, prompt injection, out-of-scope/harmful requests
 - Corpus-scope refusal (ATT&CK + AI security only)
 - Strict RAG prompt with inline [Source: …] citations
 - Optional local LoRA model for generation (TinyLlama + PEFT adapter)
+- Post-generation cleanup to prevent prompt/rules/context leakage
 - Post-generation normalization for key definition questions (e.g., tactic)
+- Optional per-call reranker knobs (configured on cached retriever instance)
 """
 
 from __future__ import annotations
@@ -17,13 +21,13 @@ from typing import Dict, List, Any, Optional, Tuple
 from dotenv import load_dotenv
 from openai import OpenAI, OpenAIError
 
-from rag.retrieval import HybridRetriever
-from rag.guardrails import scrub_pii, is_injection, is_out_of_scope_or_harmful
-from libs.prompts import make_strict_rag_prompt
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel, PeftConfig
+
+from rag.retrieval import HybridRetriever
+from rag.guardrails import scrub_pii, is_injection, is_out_of_scope_or_harmful
+from libs.prompts import make_strict_rag_prompt
 
 # ---------------------------------------------------------------------
 # Env + logging
@@ -42,7 +46,6 @@ REFUSAL_TEXT = "I don't know. The answer is not covered by the provided document
 # Generation configuration
 # ---------------------------------------------------------------------
 
-# If LORA_PATH points to a PEFT adapter, we read base model from adapter config.
 LORA_PATH = os.getenv("LORA_PATH", "models/soc-assistant-lora/adapter")
 BASE_MODEL_FALLBACK = os.getenv("LOCAL_BASE_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 
@@ -86,7 +89,6 @@ client = _get_openai_client()
 # Corpus-scope enforcement (prevents “tax advice” etc.)
 # ---------------------------------------------------------------------
 
-
 _ALLOWED_SCOPE_TERMS = (
     "attack",
     "att&ck",
@@ -107,13 +109,48 @@ _ALLOWED_SCOPE_TERMS = (
 
 
 def is_out_of_corpus(question: str) -> bool:
-    """
-    Hard scope gate:
-    - If the question does not look related to ATT&CK / AI security documents,
-      refuse with the standard refusal. This is separate from “unsafe/harmful.”
-    """
     q = (question or "").lower()
     return not any(term in q for term in _ALLOWED_SCOPE_TERMS)
+
+
+# ---------------------------------------------------------------------
+# Output cleanup (prevents rule/context leakage in returned answer)
+# ---------------------------------------------------------------------
+
+def _clean_model_output(text: str) -> str:
+    """
+    Make sure we return ONLY the final answer text.
+
+    This handles small-model echo behaviors where it repeats:
+      - OUTPUT RULES
+      - CONTEXT
+      - QUESTION
+      - full prompt text
+    """
+    if not text:
+        return REFUSAL_TEXT
+
+    t = text.strip()
+
+    # If prompt uses an "ANSWER:" marker, keep only what follows.
+    if "ANSWER:" in t:
+        t = t.split("ANSWER:", 1)[-1].strip()
+
+    # If the model leaked prompt sections anyway, cut them out.
+    leak_markers = [
+        "OUTPUT RULES",
+        "CRITICAL RULES",
+        "CONTEXT:",
+        "QUESTION:",
+        "SYSTEM_PROMPT",
+        "TOOL_TRACE",
+    ]
+    for m in leak_markers:
+        idx = t.find(m)
+        if idx != -1:
+            t = t[:idx].strip()
+
+    return t or REFUSAL_TEXT
 
 
 # ---------------------------------------------------------------------
@@ -133,14 +170,6 @@ def _best_device() -> str:
 
 
 def _load_local_lora_model() -> Tuple[Any, Any]:
-    """
-    Loads base model + applies LoRA adapter at LORA_PATH.
-
-    Notes for Apple Silicon / MPS:
-    - Avoid device_map="auto" to prevent meta tensors / accelerate sharding issues.
-    - Load then move to device explicitly.
-    - Prefer base model from adapter config to ensure compatibility.
-    """
     global _local_model, _local_tokenizer
 
     if _local_model is not None and _local_tokenizer is not None:
@@ -168,16 +197,13 @@ def _load_local_lora_model() -> Tuple[Any, Any]:
 
     base = AutoModelForCausalLM.from_pretrained(
         base_model_name,
-        dtype=dtype,            # Transformers warns that torch_dtype is deprecated; use dtype.
+        dtype=dtype,
         low_cpu_mem_usage=True,
         device_map=None,
-    )
-
-    base = base.to(device)
+    ).to(device)
 
     logger.info("Applying LoRA adapter: %s", LORA_PATH)
     model = PeftModel.from_pretrained(base, LORA_PATH)
-
     model.eval()
 
     _local_model, _local_tokenizer = model, tok
@@ -199,50 +225,31 @@ def _generate_local(prompt: str) -> str:
         pad_token_id=tok.pad_token_id,
         eos_token_id=tok.eos_token_id,
     )
-
-    # Transformers warns/ignores temperature if do_sample=False; only pass when sampling.
     if do_sample:
         gen_kwargs["temperature"] = LOCAL_TEMPERATURE
 
     with torch.no_grad():
         out = model.generate(**inputs, **gen_kwargs)
 
-    text = tok.decode(out[0], skip_special_tokens=True).strip()
-
-    # Your strict prompt ends with "ANSWER:"; try to return only what follows.
-    if "ANSWER:" in text:
-        text = text.split("ANSWER:", 1)[-1].strip()
-
-    return text or REFUSAL_TEXT
+    raw = tok.decode(out[0], skip_special_tokens=True)
+    return _clean_model_output(raw)
 
 
 # ---------------------------------------------------------------------
 # Post-generation normalization (to satisfy tests / small-model drift)
 # ---------------------------------------------------------------------
 
-
 def _normalize_definition(answer: str, term: str) -> str:
-    """
-    If the model fails to include the key “goal/objective” framing for
-    definition questions, force a minimal canonical definition prefix.
-    """
     if not answer:
         return answer
     a = answer.lower()
     if ("goal" in a) or ("objective" in a):
         return answer
-    prefix = (
-        f"A {term} is the adversary's technical goal or objective—the reason an action is performed. "
-    )
+    prefix = f"A {term} is the adversary's technical goal or objective—the reason an action is performed. "
     return (prefix + answer).strip()
 
 
 def _is_definition_question(question: str) -> Optional[str]:
-    """
-    Return the defined term for patterns like:
-      - "What is a tactic ...?"
-      - "What is a technique ...?"
-    """
     q = (question or "").strip().lower()
     if q.startswith("what is a tactic"):
         return "tactic"
@@ -258,7 +265,7 @@ def _is_definition_question(question: str) -> Optional[str]:
 _retrievers: Dict[float, HybridRetriever] = {}
 
 
-def _get_retriever(alpha: float = 0.5) -> HybridRetriever:
+def _get_retriever(alpha: float = 0.6) -> HybridRetriever:
     global _retrievers
     if alpha not in _retrievers:
         logger.info("Building HybridRetriever(alpha=%.2f)", alpha)
@@ -266,26 +273,40 @@ def _get_retriever(alpha: float = 0.5) -> HybridRetriever:
     return _retrievers[alpha]
 
 
+def _configure_retriever_for_call(
+    retriever: HybridRetriever,
+    *,
+    use_reranker: bool,
+    reranker_model: str,
+    rerank_top_n: int,
+    rerank_lambda: float,
+    rerank_max_chars: int,
+) -> None:
+    # Configure reranker knobs on cached retriever instance (if present)
+    if hasattr(retriever, "use_reranker"):
+        retriever.use_reranker = bool(use_reranker)
+    if hasattr(retriever, "reranker_model"):
+        retriever.reranker_model = reranker_model
+    if hasattr(retriever, "rerank_top_n"):
+        retriever.rerank_top_n = int(rerank_top_n)
+    if hasattr(retriever, "rerank_lambda"):
+        retriever.rerank_lambda = float(rerank_lambda)
+    if hasattr(retriever, "rerank_max_chars"):
+        retriever.rerank_max_chars = int(rerank_max_chars)
+
+
 # ---------------------------------------------------------------------
 # Context building
 # ---------------------------------------------------------------------
-
 
 def _build_context(passages: List[Dict[str, Any]]) -> str:
     if not passages:
         return ""
 
     passages_sorted = sorted(passages, key=lambda p: p.get("score", 0.0), reverse=True)
-    top_score = passages_sorted[0].get("score", 0.0)
+    used = passages_sorted[:8]
 
-    if top_score > 0:
-        filtered = [p for p in passages_sorted if p.get("score", 0.0) >= 0.6 * top_score]
-    else:
-        filtered = passages_sorted
-
-    used = (filtered or passages_sorted[:5])[:8]
-
-    max_chunk_chars = 900
+    max_chunk_chars = 1400
     context_lines: List[str] = []
 
     for p in used:
@@ -313,7 +334,6 @@ def _build_context(passages: List[Dict[str, Any]]) -> str:
 # Prompt building
 # ---------------------------------------------------------------------
 
-
 def build_prompt(question: str, passages: List[Dict[str, Any]]) -> str:
     context_text = _build_context(passages)
     return make_strict_rag_prompt(context=context_text, question=question)
@@ -322,7 +342,6 @@ def build_prompt(question: str, passages: List[Dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------
 # Retrieval logging
 # ---------------------------------------------------------------------
-
 
 def _log_retrieval_stats(question: str, passages: List[Dict[str, Any]], top_k: int) -> None:
     if not passages:
@@ -346,11 +365,20 @@ def _log_retrieval_stats(question: str, passages: List[Dict[str, Any]], top_k: i
 # Main entrypoint
 # ---------------------------------------------------------------------
 
-
-def answer_query(q: str, top_k: int = 8, alpha: float = 0.7) -> Dict[str, Any]:
+def answer_query(
+    q: str,
+    top_k: int = 4,
+    alpha: float = 0.6,
+    semantic_top_k: int = 60,
+    use_reranker: bool = False,
+    reranker_model: str = "BAAI/bge-reranker-v2-m3",
+    rerank_top_n: int = 60,
+    rerank_lambda: float = 0.70,
+    rerank_max_chars: int = 1800,
+) -> Dict[str, Any]:
     original = q or ""
 
-    # 0) Hard corpus-scope gate (prevents tax advice etc.)
+    # 0) Hard corpus-scope gate
     if is_out_of_corpus(original):
         return {
             "question": original,
@@ -384,15 +412,24 @@ def answer_query(q: str, top_k: int = 8, alpha: float = 0.7) -> Dict[str, Any]:
             "guardrails": {"blocked": True, "reason": "prompt_injection"},
         }
 
-    # 4) Retrieval
+    # 4) Retrieval (+ optional reranking)
     retriever = _get_retriever(alpha=alpha)
-    passages = retriever.search(scrubbed, k=top_k)
+    _configure_retriever_for_call(
+        retriever,
+        use_reranker=use_reranker,
+        reranker_model=reranker_model,
+        rerank_top_n=rerank_top_n,
+        rerank_lambda=rerank_lambda,
+        rerank_max_chars=rerank_max_chars,
+    )
+
+    passages = retriever.search(scrubbed, k=top_k, semantic_top_k=semantic_top_k)
     _log_retrieval_stats(scrubbed, passages, top_k)
 
     # 5) Prompt
     prompt = build_prompt(original, passages)
 
-    # 6) Generate (local LoRA OR OpenAI)
+    # 6) Generate
     try:
         if USE_LOCAL_LORA:
             answer = _generate_local(prompt)
@@ -404,8 +441,8 @@ def answer_query(q: str, top_k: int = 8, alpha: float = 0.7) -> Dict[str, Any]:
             )
             choice = response.choices[0].message if response.choices else None
             answer = (choice.content if choice else "") or REFUSAL_TEXT
+            answer = _clean_model_output(answer)
 
-        # 6b) Post-process definition questions (stabilizes small model)
         term = _is_definition_question(original)
         if term:
             answer = _normalize_definition(answer, term)
@@ -416,7 +453,6 @@ def answer_query(q: str, top_k: int = 8, alpha: float = 0.7) -> Dict[str, Any]:
         answer = f"Unable to generate an answer right now due to an error: {exc}"
         guardrail_meta = {"blocked": False, "error": exc.__class__.__name__}
 
-    # 7) Citations
     citations: List[Dict[str, Any]] = []
     for p in passages[:top_k]:
         citations.append(
@@ -441,15 +477,22 @@ def answer_query(q: str, top_k: int = 8, alpha: float = 0.7) -> Dict[str, Any]:
 # Lightweight agent-compatible helper
 # ---------------------------------------------------------------------
 
-
-def agent_answer(q: str, top_k: int = 6, alpha: float = 0.7) -> Dict[str, Any]:
+def agent_answer(
+    q: str,
+    top_k: int = 4,
+    alpha: float = 0.6,
+    semantic_top_k: int = 60,
+    use_reranker: bool = False,
+    reranker_model: str = "BAAI/bge-reranker-v2-m3",
+    rerank_top_n: int = 60,
+    rerank_lambda: float = 0.70,
+    rerank_max_chars: int = 1800,
+) -> Dict[str, Any]:
     q = q or ""
 
-    # corpus-scope gate
     if is_out_of_corpus(q):
         return {"type": "refusal", "answer": REFUSAL_TEXT, "citations": []}
 
-    # guardrails
     if is_out_of_scope_or_harmful(q):
         return {"type": "refusal", "answer": "I can't help with that request.", "citations": []}
 
@@ -457,12 +500,19 @@ def agent_answer(q: str, top_k: int = 6, alpha: float = 0.7) -> Dict[str, Any]:
     if is_injection(scrubbed):
         return {"type": "refusal", "answer": "Query blocked by guardrails.", "citations": []}
 
-    # tool: retrieve
     retriever = _get_retriever(alpha=alpha)
-    passages = retriever.search(scrubbed, k=top_k)
+    _configure_retriever_for_call(
+        retriever,
+        use_reranker=use_reranker,
+        reranker_model=reranker_model,
+        rerank_top_n=rerank_top_n,
+        rerank_lambda=rerank_lambda,
+        rerank_max_chars=rerank_max_chars,
+    )
+    passages = retriever.search(scrubbed, k=top_k, semantic_top_k=semantic_top_k)
 
-    # tool: generate
     prompt = build_prompt(q, passages)
+
     try:
         if USE_LOCAL_LORA:
             answer = _generate_local(prompt)
@@ -474,12 +524,11 @@ def agent_answer(q: str, top_k: int = 6, alpha: float = 0.7) -> Dict[str, Any]:
             )
             msg = resp.choices[0].message if resp.choices else None
             answer = (msg.content if msg else "") or REFUSAL_TEXT
+            answer = _clean_model_output(answer)
 
-        # stabilize definition answers
         term = _is_definition_question(q)
         if term:
             answer = _normalize_definition(answer, term)
-
     except Exception as exc:
         return {"type": "error", "answer": f"Generation failed: {exc}", "citations": []}
 

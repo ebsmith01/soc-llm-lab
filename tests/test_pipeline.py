@@ -19,6 +19,6 @@ def stub_openai(monkeypatch):
 
 
 def test_basic_answer():
-    result = pipeline.answer_query("What is access control?", top_k=3)
+    result = pipeline.answer_query("What is access control?", top_k=4)
     assert "answer" in result
     assert "citations" in result

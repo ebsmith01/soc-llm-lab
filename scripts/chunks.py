@@ -75,8 +75,8 @@ def sentence_aware_separators() -> List[str]:
 # -----------------------------
 def chunk_text(
     text: str,
-    chunk_size_tokens: int = 360,
-    chunk_overlap_tokens: int = 80
+    chunk_size_tokens: int = 500,
+    chunk_overlap_tokens: int = 75
 ) -> List[str]:
     """
     Chunk a text blob into ~token chunks with overlap.
@@ -91,7 +91,7 @@ def chunk_text(
     return splitter.split_text(text)
 
 
-def build_chunks_for_file(path: Path, chunk_size_tokens=360, overlap_tokens=80) -> List[Dict]:
+def build_chunks_for_file(path: Path, chunk_size_tokens=500, overlap_tokens=75) -> List[Dict]:
     """
     Read one clean txt file and return list of chunk dicts.
     """

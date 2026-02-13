@@ -14,7 +14,7 @@ class RagService:
         # In a fuller build, you could inject retriever instances, telemetry, etc.
         pass
 
-    def answer(self, question: str, *, use_local_lora: Optional[bool] = None, top_k: int = 6, alpha: float = 0.7) -> Dict[str, Any]:
+    def answer(self, question: str, *, use_local_lora: Optional[bool] = None, top_k: int = 4, alpha: float = 0.6) -> Dict[str, Any]:
         if use_local_lora is not None:
             pipeline.USE_LOCAL_LORA = bool(use_local_lora)
 
@@ -27,4 +27,3 @@ class RagService:
             "citations": result.get("citations", []),
             "guardrails": result.get("guardrails", {}),
         }
-

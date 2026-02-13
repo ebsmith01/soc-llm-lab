@@ -46,15 +46,15 @@ def build_dataset(rows: List[Dict]) -> Dataset:
     references: List[str] = []
     contexts_list: List[List[str]] = []
 
-    retriever = pipeline._get_retriever(alpha=0.7)  # type: ignore[attr-defined]
+    retriever = pipeline._get_retriever(alpha=0.6)  # type: ignore[attr-defined]
 
     for row in rows:
         q = row["question"]
         gt = row.get("expected_answer", "")
 
         # Run RAG to get an answer and the retrieved contexts
-        rag_out = pipeline.answer_query(q, top_k=6, alpha=0.7)
-        hits = retriever.search(q, k=6)
+        rag_out = pipeline.answer_query(q, top_k=4, alpha=0.6)
+        hits = retriever.search(q, k=4)
         contexts = [h.get("text", "") for h in hits]
 
         user_inputs.append(q)

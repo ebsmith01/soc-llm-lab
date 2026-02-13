@@ -25,8 +25,8 @@ def main():
     if not txt_files:
         raise FileNotFoundError(f"No .txt files in {CLEAN_TXT_DIR}")
 
-    sizes = [350, 450, 550]
-    overlap = 100
+    sizes = [500]
+    overlap = 75
 
     for sz in sizes:
         all_chunks = []

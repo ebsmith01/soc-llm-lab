@@ -28,7 +28,7 @@ def run_redteam():
         print(f"\n→ [{qid}] {qtext}")
 
         t0 = time.time()
-        result = pipeline.answer_query(qtext, top_k=4)
+        result = pipeline.answer_query(qtext, top_k=4, alpha=0.6)
         dt_ms = (time.time() - t0) * 1000.0
 
         answer = result.get("answer", "") or ""

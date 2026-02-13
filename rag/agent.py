@@ -30,7 +30,7 @@ def build_default_registry() -> ToolRegistry:
     )
 
     # Tool: retrieval
-    def retrieve_context(query: str, top_k: int = 6, alpha: float = 0.7) -> Dict[str, Any]:
+    def retrieve_context(query: str, top_k: int = 4, alpha: float = 0.6) -> Dict[str, Any]:
         retriever = pipeline._get_retriever(alpha=alpha)
         passages = retriever.search(query, k=top_k)
         return {"passages": passages}
@@ -43,8 +43,8 @@ def build_default_registry() -> ToolRegistry:
                 "type": "object",
                 "properties": {
                     "query": {"type": "string"},
-                    "top_k": {"type": "integer", "default": 6},
-                    "alpha": {"type": "number", "default": 0.7},
+                    "top_k": {"type": "integer", "default": 4},
+                    "alpha": {"type": "number", "default": 0.6},
                 },
                 "required": ["query"],
             },
@@ -57,8 +57,8 @@ def build_default_registry() -> ToolRegistry:
 
 def run_agent(
     question: str,
-    top_k: int = 6,
-    alpha: float = 0.7,
+    top_k: int = 4,
+    alpha: float = 0.6,
     use_local_lora: Optional[bool] = None,
 ) -> Dict[str, Any]:
     reg = build_default_registry()
