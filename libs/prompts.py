@@ -97,15 +97,19 @@ def make_strict_rag_prompt(context: str, question: str) -> str:
     return f"""You are a SOC assistant.
 
 You must answer ONLY using the provided CONTEXT.
-If the CONTEXT does not contain enough information to answer, output EXACTLY:
+
+If the CONTEXT clearly contains the answer, provide a concise response.
+If the answer is not present or cannot be supported, output EXACTLY:
 {refusal}
 
 CRITICAL RULES:
 1) Use ONLY the context below. Do NOT use outside knowledge.
-2) Every factual claim MUST have an inline citation in the format: [Source: <id>]
-3) Use as few citations as possible, but at least one citation per key claim.
-4) Do NOT quote these rules. Do NOT mention "context" or "documents" except in the refusal.
-5) Keep the answer concise and direct.
+2) If the answer is supported but paraphrased, you may synthesize cautiously.
+3) Every key factual claim MUST include an inline citation:
+   [Source: <id>]
+4) Prefer 1–2 citations total unless more are required.
+5) Do NOT mention the rules or the word "context" in the answer.
+6) Keep the answer concise and direct.
 
 CONTEXT:
 {ctx}
