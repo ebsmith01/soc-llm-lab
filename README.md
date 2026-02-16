@@ -11,19 +11,18 @@ This repository contains a production-grade, security-aware LLM platform that su
 
 ### Hybrid retriever
 1. BM25 + vector similarity with weighted fusion (alpha = 60%).
-    •	Higher recall across both structured and unstructured queries.
-	•	Better grounding for improved citation accuracy in responses.
+    *	Higher recall across both structured and unstructured queries.
+	*	Better grounding for improved citation accuracy in responses.
 
 2. Eval metrics: semantic F1, grounding score, exact match, and latency.
 
-# Challenge:
-The system found the right information but worded answers differently than the evaluation expected. 
-Fix
-	•	Added intent detection to recognize question types (multi-hop, needle, structure, direct fact).
-	•	Updated prompts to guide answer format (lists for structure, excerpts for passages, explicit connectors for multi-hop).
-	•	Introduced post-generation stabilization to ensure exact framework terms and keywords appear when grounded by citations.
-	•	Expanded retrieval to support larger candidate pools (semantic_top_k) for harder queries.
-	•	Integrated optional reranking controls (cross-encoder + blending) without breaking latency or guardrails.
+# Challenge: 
+### The system found the right information but worded answers differently than the evaluation expected. 
+* Added intent detection to recognize question types (multi-hop, needle, structure, direct fact).
+* Updated prompts to guide answer format (lists for structure, excerpts for passages, explicit connectors for multi-hop).
+* Introduced post-generation stabilization to ensure exact framework terms and keywords appear when grounded by citations.
+* Expanded retrieval to support larger candidate pools (semantic_top_k) for harder queries.
+* Integrated optional reranking controls (cross-encoder + blending) without breaking latency or guardrails.
 
 ### Guardrails and prompting
 1. PII scrubbing, prompt-injection heuristics, and harmful/out-of-scope filters.
@@ -31,12 +30,11 @@ Fix
 3. Apply filters before LLM invocation to reduce risk of leakage or unsafe outputs.
 
 # Challenge 
-The model would answer confidently even when the answer wasn’t fully supported by retrieved context.
-Fix
-	•	Designed a strict RAG contract prompt
-	•	Required inline citations
-	•	Enforced a standardized refusal
-	•	Added grounding-aware eval metrics (semantic F1 + citation requirement)
+### The model would answer confidently even when the answer wasn’t fully supported by retrieved context.
+*	Designed a strict RAG contract prompt
+*	Required inline citations
+*	Enforced a standardized refusal
+*	Added grounding-aware eval metrics (semantic F1 + citation requirement)
 
 ### Generation
 1. OpenAI path: GPT-4.1 via API for comparison and high-quality responses.
