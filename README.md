@@ -53,3 +53,11 @@ Fix
 3. Pytest also used for detecting regressions when updating prompts, models, or indexes.
 
 bash demo.sh
+
+# Other ideas I’d try to beat the tuning plateau:
+1. Upgrade the embedding model and rebuild vectors
+2. Use selective reranking only for direct-fact questions
+3. Add light query rewriting to include canonical ATT&CK / AI-security terms
+4. Switch to section/heading-aware chunking to keep key sentences together
+5. Expand the eval set and add “hard negatives” to better stress retrieval and ranking
+
